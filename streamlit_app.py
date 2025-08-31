@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from data_fetcher import fetch_prices   # uses exchanges inside, no args
+from data_fetcher import fetch_prices   # our parallel fetcher
 
 # Title
 st.title("Crypto Arbitrage Dashboard")
@@ -13,14 +13,15 @@ selected_token = st.sidebar.selectbox("Choose a token", tokens)
 # Fetch live prices (all exchanges)
 prices_by_exchange = fetch_prices()
 
-# If we have price data for the selected token
+# Collect prices for the selected token across exchanges
 token_prices = {}
 for ex, ex_data in prices_by_exchange.items():
     if selected_token in ex_data:
         token_prices[ex] = ex_data[selected_token]
 
+# Show results
 if token_prices:
-    # Display prices in a table
+    # Display in a table
     df = pd.DataFrame(list(token_prices.items()), columns=["Exchange", "Price (USD)"])
     st.subheader(f"Live Prices for {selected_token}")
     st.table(df)
