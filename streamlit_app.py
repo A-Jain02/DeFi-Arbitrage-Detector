@@ -62,14 +62,14 @@ for token in tokens:
         arbitrage_data.append({
             "Token": name,
             "Buy Exchange": min_ex,
-            "Buy Price": f"{smart_round(name, min_price):,.4f}" if name in ["ADA", "DOGE"] else f"{smart_round(name, min_price):,.2f}",
+            "Buy Price": smart_round(name, min_price),
             "Sell Exchange": max_ex,
-            "Sell Price": f"{smart_round(name, max_price):,.4f}" if name in ["ADA", "DOGE"] else f"{smart_round(name, max_price):,.2f}",
-            "Profit %": f"{profit_pct:.2f}%"
+            "Sell Price": smart_round(name, max_price),
+            "Profit %": round(profit_pct, 2)
         })
 
-        # Store alerts if profit > 0.02%
-        if profit_pct > 0.02:
+        # Store alerts if profit > 0.15%
+        if profit_pct > 0.15:
             detailed_alerts.append(
                 f"{token.replace('USDT','')}: Buy on {min_ex} @ {min_price:.2f}, "
                 f"Sell on {max_ex} @ {max_price:.2f} → Profit {profit_pct:.2f}%"
@@ -80,13 +80,22 @@ if arbitrage_data:
     df = pd.DataFrame(arbitrage_data)
     df = df.sort_values(by="Profit %", ascending=False)
     st.subheader("📊 Arbitrage Opportunities Leaderboard")
-    # Color-coded dataframe
-    st.dataframe(
-      df.style.applymap(lambda v: "background-color: green" if v in df["Buy Exchange"].values else "", subset=["Buy Exchange"])
-               .applymap(lambda v: "background-color: firebrick" if v in df["Sell Exchange"].values else "", subset=["Sell Exchange"])
-               .background_gradient(cmap="Greens", subset=["Profit %"]),
-      use_container_width=True
-   )
+
+    # Combine formatting + colors into one styled object
+    df_styled = (
+        df.style
+        .format({
+            "Buy Price": lambda x: f"{x:.4f}" if df.loc[df["Buy Price"] == x, "Token"].values[0] in ["ADA", "DOGE"] else f"{x:.4f}",
+            "Sell Price": lambda x: f"{x:.4f}" if df.loc[df["Sell Price"] == x, "Token"].values[0] in ["ADA", "DOGE"] else f"{x:.4f}",
+            "Profit %": "{:.4f}%".format
+        })
+        .applymap(lambda v: "background-color: green" if v in df["Buy Exchange"].values else "", subset=["Buy Exchange"])
+        .applymap(lambda v: "background-color: firebrick" if v in df["Sell Exchange"].values else "", subset=["Sell Exchange"])
+        .background_gradient(cmap="Greens", subset=["Profit %"])
+    )
+
+    # Display styled dataframe
+    st.dataframe(df_styled, use_container_width=True)
 
    # Profit Bar Chart
     st.subheader("📈 Arbitrage Profit % by Token")
@@ -116,7 +125,7 @@ if arbitrage_data:
 
     # Show detailed alerts
     if detailed_alerts:
-        st.error("🚨 Arbitrage Opportunities > 0.02%:")
+        st.error("🚨 Arbitrage Opportunities > 0.15%:")
         for alert in detailed_alerts:
             st.write(alert)
 
