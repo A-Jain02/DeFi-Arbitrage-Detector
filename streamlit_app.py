@@ -1,44 +1,125 @@
 import streamlit as st
 import pandas as pd
-from data_fetcher import fetch_prices   # our parallel fetcher
+import datetime
+import matplotlib.pyplot as plt
+from ws_multi import latest_prices, launch_all_ws
+from streamlit_autorefresh import st_autorefresh
 
-# Title
-st.title("Crypto Arbitrage Dashboard")
+# Auto-refresh every 10 seconds
+st_autorefresh(interval=10 * 1000, key="datarefresh")
 
-# Sidebar for token selection
-st.sidebar.header("Select Currency")
-tokens = ["BTC", "ETH", "USDT", "BNB", "ADA", "DOGE", "SOL", "DOT"]
-selected_token = st.sidebar.selectbox("Choose a token", tokens)
+# Start WebSockets once
+if "ws_started" not in st.session_state:
+    launch_all_ws()
+    st.session_state["ws_started"] = True
 
-# Fetch live prices (all exchanges)
-prices_by_exchange = fetch_prices()
+st.title("🚀 Multi-Exchange Crypto Arbitrage Leaderboard (Live)")
 
-# Collect prices for the selected token across exchanges
-token_prices = {}
-for ex, ex_data in prices_by_exchange.items():
-    if selected_token in ex_data:
-        token_prices[ex] = ex_data[selected_token]
+tokens = ["BTCUSDT", "ETHUSDT", "ADAUSDT", "SOLUSDT", "DOGEUSDT"]
 
-# Show results
-if token_prices:
-    # Display in a table
-    df = pd.DataFrame(list(token_prices.items()), columns=["Exchange", "Price (USD)"])
-    st.subheader(f"Live Prices for {selected_token}")
-    st.table(df)
+symbol_map = {
+    "BTCUSDT": {"binance": "BTCUSDT", "coinbase": "BTCUSD", "kraken": "XBTUSD", "bitfinex": "tBTCUSD", "okx": "BTCUSDT"},
+    "ETHUSDT": {"binance": "ETHUSDT", "coinbase": "ETHUSD", "kraken": "ETHUSD", "bitfinex": "tETHUSD", "okx": "ETHUSDT"},
+    "ADAUSDT": {"binance": "ADAUSDT", "coinbase": "ADAUSD", "kraken": "ADAUSD", "bitfinex": "tADAUSD", "okx": "ADAUSDT"},
+    "SOLUSDT": {"binance": "SOLUSDT", "coinbase": "SOLUSD", "kraken": "SOLUSD", "bitfinex": "tSOLUSD", "okx": "SOLUSDT"},
+    "DOGEUSDT": {"binance": "DOGEUSDT", "coinbase": "DOGEUSD", "kraken": "DOGEUSD", "bitfinex": "tDOGEUSD", "okx": "DOGEUSDT"},
+}
+def smart_round(token, price):
+   if token in ["ADA", "DOGE"]:   # low-value tokens
+      return round(price, 4)
+   else:                          # high-value tokens
+      return round(price, 2)
 
-    # Arbitrage detection: min vs max
-    min_ex = min(token_prices, key=token_prices.get)
-    max_ex = max(token_prices, key=token_prices.get)
-    min_price = token_prices[min_ex]
-    max_price = token_prices[max_ex]
+# Keep historical data for sparklines
+if "history" not in st.session_state:
+    st.session_state["history"] = {t.replace("USDT", ""): [] for t in tokens}
 
-    if max_price > min_price:
+# Collect arbitrage opportunities
+arbitrage_data = []
+detailed_alerts = []
+
+
+for token in tokens:
+    prices = {}
+    for ex, mapping in symbol_map[token].items():
+        if mapping in latest_prices[ex]:
+            prices[ex] = latest_prices[ex][mapping]
+
+    if len(prices) >= 2:
+        min_ex = min(prices, key=prices.get)
+        max_ex = max(prices, key=prices.get)
+        min_price = prices[min_ex]
+        max_price = prices[max_ex]
         profit_pct = ((max_price - min_price) / min_price) * 100
-        st.success(
-            f"💰 Arbitrage: Buy on {min_ex} @ {min_price:.2f}, "
-            f"Sell on {max_ex} @ {max_price:.2f} → Profit = {profit_pct:.2f}%"
-        )
-    else:
-        st.info("No arbitrage opportunity right now.")
+
+        name = token.replace("USDT", "")
+        st.session_state["history"][name].append(profit_pct)
+        if len(st.session_state["history"][name]) > 30:  # keep only last 30 points
+         st.session_state["history"][name].pop(0)
+
+        name = token.replace("USDT", "")
+    
+        arbitrage_data.append({
+            "Token": name,
+            "Buy Exchange": min_ex,
+            "Buy Price": f"{smart_round(name, min_price):,.4f}" if name in ["ADA", "DOGE"] else f"{smart_round(name, min_price):,.2f}",
+            "Sell Exchange": max_ex,
+            "Sell Price": f"{smart_round(name, max_price):,.4f}" if name in ["ADA", "DOGE"] else f"{smart_round(name, max_price):,.2f}",
+            "Profit %": f"{profit_pct:.2f}%"
+        })
+
+        # Store alerts if profit > 0.02%
+        if profit_pct > 0.02:
+            detailed_alerts.append(
+                f"{token.replace('USDT','')}: Buy on {min_ex} @ {min_price:.2f}, "
+                f"Sell on {max_ex} @ {max_price:.2f} → Profit {profit_pct:.2f}%"
+            )
+
+# Show Leaderboard
+if arbitrage_data:
+    df = pd.DataFrame(arbitrage_data)
+    df = df.sort_values(by="Profit %", ascending=False)
+    st.subheader("📊 Arbitrage Opportunities Leaderboard")
+    # Color-coded dataframe
+    st.dataframe(
+      df.style.applymap(lambda v: "background-color: green" if v in df["Buy Exchange"].values else "", subset=["Buy Exchange"])
+               .applymap(lambda v: "background-color: firebrick" if v in df["Sell Exchange"].values else "", subset=["Sell Exchange"])
+               .background_gradient(cmap="Greens", subset=["Profit %"]),
+      use_container_width=True
+   )
+
+   # Profit Bar Chart
+    st.subheader("📈 Arbitrage Profit % by Token")
+    fig, ax = plt.subplots()
+    ax.bar(df["Token"], df["Profit %"], color="navy")
+    ax.set_ylabel("Profit %")
+    ax.set_title("Current Arbitrage Opportunities")
+    st.pyplot(fig)
+
+    st.subheader("📉 Arbitrage Profit Trends (Last ~30 Refreshes)")
+   # Grid layout: 2 columns
+    cols = st.columns(2)
+
+    for i, token in enumerate(df["Token"]):
+      history = st.session_state["history"][token]
+      if history:
+        fig, ax = plt.subplots(figsize=(2.5, 1))  # much smaller
+        ax.plot(history, color="navy", linewidth=1.5)
+        ax.fill_between(range(len(history)), history, color="navy", alpha=0.2)  # shade under line
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_title(token, fontsize=9, pad=2)
+        plt.tight_layout(pad=0.1)
+
+        # Put in grid
+        cols[i % 2].pyplot(fig)
+
+    # Show detailed alerts
+    if detailed_alerts:
+        st.error("🚨 Arbitrage Opportunities > 0.02%:")
+        for alert in detailed_alerts:
+            st.write(alert)
+
+    st.caption(f"Last updated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 else:
-    st.error(f"No price data available for {selected_token}.")
+    st.info("⏳ Waiting for live prices...")
