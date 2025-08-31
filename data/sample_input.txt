@@ -1,0 +1,6 @@
+4 5          # 4 tokens, 5 conversion pairs
+0 1 0.9      # from token 0 (ETH) to token 1 (USDT), rate=0.9
+1 2 1.1      # USDT -> BTC
+2 3 0.95     # BTC -> DAI
+3 0 1.2      # DAI -> ETH
+0 2 0.5      # ETH -> BTC
