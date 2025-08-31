@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>DeFi Arbitrage Detector</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 24px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .card { background: #fff; padding: 16px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+    h2 { margin: 0 0 12px; }
+    ul { margin: 0; padding-left: 18px; }
+    .ok { color: #0a7; }
+    .warn { color: #c33; }
+    .muted { color: #666; }
+  </style>
+</head>
+<body>
+  <h1>DeFi Arbitrage Detector</h1>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Live USD Prices</h2>
+      <div id="prices" class="muted">Loading…</div>
+    </div>
+    <div class="card">
+      <h2>Arbitrage</h2>
+      <div id="arb" class="muted">Checking…</div>
+    </div>
+  </div>
+
+  <script>
+    async function fetchJSON(url) {
+      const r = await fetch(url, { cache: "no-store" });
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    }
+
+    async function refresh() {
+      try {
+        const prices = await fetchJSON("/prices");
+        const pricesDiv = document.getElementById("prices");
+        if (!prices || Object.keys(prices).length === 0) {
+          pricesDiv.textContent = "No prices available.";
+        } else {
+          let html = "<ul>";
+          for (const [t, p] of Object.entries(prices)) {
+            html += `<li>${t}: ${p}</li>`;
+          }
+          html += "</ul>";
+          pricesDiv.innerHTML = html;
+        }
+      } catch (e) {
+        document.getElementById("prices").textContent = "Error loading prices.";
+        console.error(e);
+      }
+
+      try {
+        const arb = await fetchJSON("/arbitrage");
+        const arbDiv = document.getElementById("arb");
+        if (arb.error) {
+          arbDiv.innerHTML = `<span class="warn">${arb.error}</span>`;
+        } else if (!arb.cycle) {
+          arbDiv.innerHTML = `<span class="muted">No arbitrage opportunity detected.</span>`;
+        } else {
+          arbDiv.innerHTML = `<div class="ok">Cycle: ${arb.cycle.join(" → ")}</div>`;
+        }
+      } catch (e) {
+        document.getElementById("arb").textContent = "Error checking arbitrage.";
+        console.error(e);
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 10000);
+  </script>
+</body>
+</html>
