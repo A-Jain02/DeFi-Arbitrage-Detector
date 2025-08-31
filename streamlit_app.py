@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import datetime
 import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
 from ws_multi import latest_prices, launch_all_ws
 from streamlit_autorefresh import st_autorefresh
 
@@ -18,11 +20,11 @@ st.title("🚀 Multi-Exchange Crypto Arbitrage Leaderboard (Live)")
 tokens = ["BTCUSDT", "ETHUSDT", "ADAUSDT", "SOLUSDT", "DOGEUSDT"]
 
 symbol_map = {
-    "BTCUSDT": {"binance": "BTCUSDT", "coinbase": "BTCUSD", "kraken": "XBTUSD", "bitfinex": "tBTCUSD", "okx": "BTCUSDT"},
-    "ETHUSDT": {"binance": "ETHUSDT", "coinbase": "ETHUSD", "kraken": "ETHUSD", "bitfinex": "tETHUSD", "okx": "ETHUSDT"},
-    "ADAUSDT": {"binance": "ADAUSDT", "coinbase": "ADAUSD", "kraken": "ADAUSD", "bitfinex": "tADAUSD", "okx": "ADAUSDT"},
-    "SOLUSDT": {"binance": "SOLUSDT", "coinbase": "SOLUSD", "kraken": "SOLUSD", "bitfinex": "tSOLUSD", "okx": "SOLUSDT"},
-    "DOGEUSDT": {"binance": "DOGEUSDT", "coinbase": "DOGEUSD", "kraken": "DOGEUSD", "bitfinex": "tDOGEUSD", "okx": "DOGEUSDT"},
+    "BTCUSDT": {"binance": "BTCUSDT", "coinbase": "BTCUSD", "bitfinex": "tBTCUSD", "huobi": "BTCUSDT"},
+    "ETHUSDT": {"binance": "ETHUSDT", "coinbase": "ETHUSD",  "bitfinex": "tETHUSD", "huobi": "ETHUSDT"},
+    "ADAUSDT": {"binance": "ADAUSDT", "coinbase": "ADAUSD",  "bitfinex": "tADAUSD", "huobi": "ADAUSDT"},
+    "SOLUSDT": {"binance": "SOLUSDT", "coinbase": "SOLUSD",  "bitfinex": "tSOLUSD", "huobi": "SOLUSDT"},
+    "DOGEUSDT": {"binance": "DOGEUSDT", "coinbase": "DOGEUSD", "bitfinex": "tDOGEUSD", "huobi": "DOGEUSDT"},
 }
 def smart_round(token, price):
    if token in ["ADA", "DOGE"]:   # low-value tokens
@@ -97,15 +99,45 @@ if arbitrage_data:
     # Display styled dataframe
     st.dataframe(df_styled, use_container_width=True)
 
-   # Profit Bar Chart
-    st.subheader("📈 Arbitrage Profit % by Token")
-    fig, ax = plt.subplots()
-    ax.bar(df["Token"], df["Profit %"], color="navy")
-    ax.set_ylabel("Profit %")
-    ax.set_title("Current Arbitrage Opportunities")
+    st.subheader("🔥 Arbitrage Profit Heatmap (vs Cheapest Exchange)")
+
+    heatmap_data = []
+    for token in tokens:
+      row = {"Token": token.replace("USDT", "")}
+      prices = {}
+
+      # Collect live prices
+      for ex, mapping in symbol_map[token].items():
+         if mapping in latest_prices[ex]:
+               prices[ex] = float(latest_prices[ex][mapping])
+
+      if prices:
+         min_price = min(prices.values())
+         # Compute % difference vs cheapest exchange
+         for ex in ["binance", "coinbase", "bitfinex", "huobi"]:
+               if ex in prices:
+                  row[ex] = ((prices[ex] - min_price) / min_price) * 100
+               else:
+                  row[ex] = np.nan
+         heatmap_data.append(row)
+
+    # DataFrame
+    heatmap_df = pd.DataFrame(heatmap_data).set_index("Token")
+
+    # Plot heatmap
+    fig, ax = plt.subplots(figsize=(8, 4))
+    sns.heatmap(
+      heatmap_df.astype(float),
+      annot=True, fmt=".2f",
+      cmap="RdYlGn", linewidths=0.5,
+      center=0,  # so 0% = neutral color
+      cbar_kws={'label': 'Profit vs Cheapest (%)'}
+    ) 
+
+    plt.title("Profit Spread Across Exchanges", fontsize=12)
     st.pyplot(fig)
 
-    st.subheader("📉 Arbitrage Profit Trends (Last ~30 Refreshes)")
+    st.subheader("📉 Arbitrage Profit Trends (Last ~30s Refreshes)")
    # Grid layout: 2 columns
     cols = st.columns(2)
 

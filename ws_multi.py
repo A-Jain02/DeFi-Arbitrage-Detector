@@ -2,10 +2,11 @@
 import json
 import websocket
 import threading
+import gzip
 
 # Shared dict of latest prices
 latest_prices = {
-    "binance": {}, "coinbase": {}, "kraken": {}, "bitfinex": {}, "okx": {}
+    "binance": {}, "coinbase": {}, "bitfinex": {}, "huobi": {}
 }
 
 # ------------------ BINANCE ------------------
@@ -59,28 +60,6 @@ def coinbase_ws():
     ws = websocket.WebSocketApp(url, on_open=on_open, on_message=on_message)
     ws.run_forever()
 
-# ------------------ KRAKEN ------------------
-def kraken_ws():
-    url = "wss://ws.kraken.com"
-
-    def on_message(ws, message):
-        data = json.loads(message)
-        if isinstance(data, list) and len(data) > 1 and isinstance(data[1], dict):
-            price = float(data[1]["c"][0])  # last trade
-            pair = data[-1]  # e.g. XBT/USD
-            latest_prices["kraken"][pair.replace("/", "").upper()] = price
-
-    def on_open(ws):
-        params = {
-            "event": "subscribe",
-            "pair": ["XBT/USD", "ETH/USD", "ADA/USD", "SOL/USD", "DOGE/USD"],
-            "subscription": {"name": "ticker"}
-        }
-        ws.send(json.dumps(params))
-
-    ws = websocket.WebSocketApp(url, on_open=on_open, on_message=on_message)
-    ws.run_forever()
-
 # ------------------ BITFINEX ------------------
 def bitfinex_ws():
     url = "wss://api-pub.bitfinex.com/ws/2"
@@ -91,7 +70,7 @@ def bitfinex_ws():
         if isinstance(data, dict) and data.get("event") == "subscribed":
             bitfinex_pairs[data["chanId"]] = data["symbol"]
         elif isinstance(data, list) and len(data) > 1 and isinstance(data[1], list):
-            price = float(data[1][6])
+            price = float(data[1][6])  # last price index
             chan_id = data[0]
             if chan_id in bitfinex_pairs:
                 symbol = bitfinex_pairs[chan_id]
@@ -105,32 +84,35 @@ def bitfinex_ws():
     ws = websocket.WebSocketApp(url, on_open=on_open, on_message=on_message)
     ws.run_forever()
 
-# ------------------ OKX ------------------
-def okx_ws():
-    url = "wss://ws.okx.com:8443/ws/v5/public"
+# ------------------ HUOBI ------------------
+def huobi_ws():
+    url = "wss://api.huobi.pro/ws"
 
     def on_message(ws, message):
-        data = json.loads(message)
-        if "arg" in data and "data" in data:
-            inst = data["arg"]["instId"]  # e.g. BTC-USDT
-            price = float(data["data"][0]["last"])
-            latest_prices["okx"][inst.replace("-", "")] = price
+        # Huobi sends gzip compressed messages
+        data = json.loads(gzip.decompress(message).decode())
+        if "tick" in data and "ch" in data:
+            # e.g. ch: market.btcusdt.trade.detail
+            symbol = data["ch"].split(".")[1].upper()  # BTCUSDT
+            price = float(data["tick"]["data"][0]["price"])
+            latest_prices["huobi"][symbol] = price
 
     def on_open(ws):
-        subs = {
-            "op": "subscribe",
-            "args": [{"channel": "tickers", "instId": p} for p in
-                     ["BTC-USDT", "ETH-USDT", "ADA-USDT", "SOL-USDT", "DOGE-USDT"]]
-        }
-        ws.send(json.dumps(subs))
+        subs = [
+            {"sub": f"market.{p}.trade.detail", "id": p}
+            for p in ["btcusdt", "ethusdt", "adausdt", "solusdt", "dogeusdt"]
+        ]
+        for s in subs:
+            ws.send(json.dumps(s))
 
     ws = websocket.WebSocketApp(url, on_open=on_open, on_message=on_message)
     ws.run_forever()
+
 
 # ------------------ START ALL ------------------
 def launch_all_ws():
     threading.Thread(target=binance_ws, daemon=True).start()
     threading.Thread(target=coinbase_ws, daemon=True).start()
-    threading.Thread(target=kraken_ws, daemon=True).start()
     threading.Thread(target=bitfinex_ws, daemon=True).start()
-    threading.Thread(target=okx_ws, daemon=True).start()
+    threading.Thread(target=huobi_ws, daemon=True).start()
+
